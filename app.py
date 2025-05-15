@@ -37,7 +37,9 @@ class ApkBuilderGUI(QWidget):
             'keystore_path': '',
             'keystore_pass': '',
             'keystore_out': '',
-            'sdk_path': ''
+            'sdk_path': '',
+            'gen_alias': '',        # Added for keystore generation
+            'gen_alias_pass': ''   # Added for keystore generation
         }
         self.load_settings()
 
@@ -52,9 +54,6 @@ class ApkBuilderGUI(QWidget):
         self.aligned_apk = None    # path to intermediate aligned APK
 
     def load_settings(self):
-        """
-        Load persisted settings from a YAML file. Ignore errors silently.
-        """
         if os.path.isfile(CONFIG_FILE):
             try:
                 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -65,9 +64,6 @@ class ApkBuilderGUI(QWidget):
                 pass  # if parsing fails, skip without breaking
 
     def save_settings(self):
-        """
-        Save current settings to a YAML file. Show warning on failure.
-        """
         try:
             with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
                 yaml.safe_dump(self.settings, f)
@@ -75,10 +71,6 @@ class ApkBuilderGUI(QWidget):
             QMessageBox.warning(self, 'Warning', f'Cannot save settings: {e}')
 
     def setup_ui(self):
-        """
-        Create and arrange all UI components: mode buttons, stacked pages,
-        file selectors, Run button, and console output.
-        """
         layout = QVBoxLayout(self)
 
         # Top row: Dump / Pack / Keystore mode selection
@@ -124,7 +116,7 @@ class ApkBuilderGUI(QWidget):
         pf.addRow(btn)
 
         self.keystore_pass_edit = QLineEdit(self.settings['keystore_pass'])
-        self.keystore_pass_edit.setEchoMode(QLineEdit.Password)
+        self.keystore_pass_edit.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
         pf.addRow('Keystore Password:', self.keystore_pass_edit)
 
         self.stack.addWidget(pack_page)
@@ -137,6 +129,14 @@ class ApkBuilderGUI(QWidget):
         btn = QPushButton('Browse…')
         btn.clicked.connect(self.select_keystore_output)
         gf.addRow(btn)
+
+        self.ks_alias_edit = QLineEdit(self.settings['gen_alias'])
+        gf.addRow('Alias:', self.ks_alias_edit)
+
+        self.ks_alias_pass_edit = QLineEdit(self.settings['gen_alias_pass'])
+        self.ks_alias_pass_edit.setEchoMode(QLineEdit.Password)
+        gf.addRow('Alias Password:', self.ks_alias_pass_edit)
+
         self.stack.addWidget(gen_page)
 
         # --- SDK root selector (optional) ---
@@ -165,9 +165,6 @@ class ApkBuilderGUI(QWidget):
         self.btn_keystore.clicked.connect(lambda: self.switch_mode(2))
 
     def apply_dark_theme(self):
-        """
-        Apply a simple dark stylesheet reminiscent of VS Code.
-        """
         self.setStyleSheet(
             "QWidget{background:#1e1e1e;color:#d4d4d4;}"
             "QLineEdit,QTextEdit{background:#252526;color:#cccccc;}"
@@ -176,10 +173,6 @@ class ApkBuilderGUI(QWidget):
         )
 
     def switch_mode(self, idx):
-        """
-        Highlight the selected mode button and show the
-        corresponding stacked page.
-        """
         self.btn_dump.setChecked(idx == 0)
         self.btn_pack.setChecked(idx == 1)
         self.btn_keystore.setChecked(idx == 2)
@@ -219,17 +212,25 @@ class ApkBuilderGUI(QWidget):
             self.settings['sdk_path'] = path
 
     def start_mode(self):
-        """
-        Build the list of external commands based on the selected mode and
-        kick off QProcess to run them sequentially.
-        """
         # Disable Run button while processing
         self.run_button.setEnabled(False)
         self.console.clear()
+
+        # Update settings from UI fields before saving
+        s = self.settings
+        s['dump_file'] = self.dump_file_edit.text()
+        s['dump_out'] = self.dump_out_edit.text()
+        s['pack_dir'] = self.pack_dir_edit.text()
+        s['keystore_path'] = self.keystore_path_edit.text()
+        s['keystore_pass'] = self.keystore_pass_edit.text()
+        s['keystore_out'] = self.ks_out_edit.text()
+        s['sdk_path'] = self.sdk_path_edit.text()
+        s['gen_alias'] = self.ks_alias_edit.text()
+        s['gen_alias_pass'] = self.ks_alias_pass_edit.text()
+
         self.save_settings()  # persist user inputs
 
         mode = self.stack.currentIndex()
-        s = self.settings
         self.commands = []
         self.current_index = 0
         self.built_apk = None
@@ -340,9 +341,6 @@ class ApkBuilderGUI(QWidget):
         return cmd
 
     def execute_next(self):
-        """
-        Launch the next command in the queue, or finish if done.
-        """
         if self.current_index >= len(self.commands):
             QMessageBox.information(self, 'Done', 'All tasks completed')
             # Clean up intermediate APKs if in Pack mode
@@ -367,9 +365,6 @@ class ApkBuilderGUI(QWidget):
         self.current_index += 1
 
     def on_output(self):
-        """
-        Append any non-empty stdout/stderr output to the console.
-        """
         try:
             data = self.process.readAllStandardOutput().data().decode('utf-8')
             if data.strip():
@@ -378,10 +373,6 @@ class ApkBuilderGUI(QWidget):
             self.console.append(f'> Error : {e}')
 
     def on_finished(self, exit_code, exit_status):
-        """
-        Called when a process finishes: log its exit code/status,
-        then trigger the next command if any.
-        """
         self.console.append(f"[Finished] exitCode={exit_code}, status={exit_status}")
         self.execute_next()
     
